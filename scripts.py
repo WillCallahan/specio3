@@ -1,6 +1,8 @@
 import shutil
 import os
 import fnmatch
+import subprocess
+import sys
 
 
 def _clean_dir(path):
@@ -84,3 +86,35 @@ def test():
     """
     os.system('python -m pytest -s -v')
     print("Tests completed successfully!")
+
+
+def format():
+    """
+    Format Python code using Black code formatter.
+
+    This function runs Black on the specio3 package and tests directory
+    to ensure consistent code formatting across the project.
+    """
+    print("Formatting Python code with Black...")
+    try:
+        subprocess.run([sys.executable, "-m", "black", "specio3/", "tests/", "scripts.py"], check=True)
+        print("✅ Code formatting completed successfully!")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Code formatting failed: {e}")
+        sys.exit(1)
+
+
+def lint():
+    """
+    Check Python code formatting with Black (dry-run).
+
+    This function runs Black in check mode to verify that all Python code
+    follows the project's formatting standards without making changes.
+    """
+    print("Checking code formatting with Black...")
+    try:
+        subprocess.run([sys.executable, "-m", "black", "--check", "--diff", "specio3/", "tests/", "scripts.py"], check=True)
+        print("✅ All code is properly formatted!")
+    except subprocess.CalledProcessError as e:
+        print("❌ Code formatting issues found. Run 'poetry run format' to fix them.")
+        sys.exit(1)

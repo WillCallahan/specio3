@@ -89,15 +89,6 @@ jobs:
           --cov-report=term-missing \
           --junitxml=test-results.xml
 
-    - name: Upload coverage to Codecov
-      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
-      uses: codecov/codecov-action@v4
-      with:
-        file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
-        token: ${{ secrets.CODECOV_TOKEN }}
-
     - name: Upload test results
       uses: actions/upload-artifact@v4
       if: always()
@@ -110,7 +101,7 @@ jobs:
 
     - name: Publish test results
       uses: EnricoMi/publish-unit-test-result-action@v2
-      if: always()
+      if: always() && matrix.os == 'ubuntu-latest'
       with:
         files: test-results.xml
         check_name: "Test Results (${{ matrix.os }}, Python ${{ matrix.python-version }})"
@@ -123,13 +114,50 @@ jobs:
 
     - name: Test Report Summary
       uses: phoenix-actions/test-reporting@v12
-      if: always()
+      if: always() && matrix.os == 'ubuntu-latest' && hashFiles('test-results.xml') != ''
       with:
         name: "Test Results Summary (${{ matrix.os }}, Python ${{ matrix.python-version }})"
         path: test-results.xml
         reporter: java-junit
         fail-on-error: false
         output-to: step-summary
+
+    - name: Test Summary (Cross-platform)
+      if: always() && matrix.os != 'ubuntu-latest'
+      run: |
+        echo "## Test Results for ${{ matrix.os }} - Python ${{ matrix.python-version }}" >> $GITHUB_STEP_SUMMARY
+        if [ -f test-results.xml ]; then
+          echo "✅ Tests completed. Results uploaded as artifacts." >> $GITHUB_STEP_SUMMARY
+          # Simple test count extraction from JUnit XML
+          if command -v python3 &> /dev/null; then
+            python3 -c "
+import xml.etree.ElementTree as ET
+try:
+    tree = ET.parse('test-results.xml')
+    root = tree.getroot()
+    tests = root.get('tests', '0')
+    failures = root.get('failures', '0')
+    errors = root.get('errors', '0')
+    time = root.get('time', '0')
+    print(f'**Tests:** {tests} | **Failures:** {failures} | **Errors:** {errors} | **Time:** {time}s')
+except Exception as e:
+    print(f'Could not parse test results: {e}')
+" >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "❌ No test results found" >> $GITHUB_STEP_SUMMARY
+        fi
+      shell: bash
+
+    - name: Debug test files (on failure)
+      if: failure()
+      run: |
+        echo "Current directory contents:"
+        ls -la
+        echo "Looking for test files:"
+        find . -name "*.xml" -type f || true
+        find . -name "*test*" -type f || true
+      shell: bash
 
   build:
     name: Build distribution packages

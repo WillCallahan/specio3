@@ -33,6 +33,7 @@ setuptools = "^80.9.0"
 pybind11 = "^3.0.0"
 pytest = "^8.0.0"
 pytest-cov = "^6.2.1"
+black = "^25.1.0"
 
 [tool.poetry.scripts]
 clean = "scripts:clean"
@@ -40,6 +41,8 @@ build = "scripts:build"
 rebuild = "scripts:rebuild"
 test = "scripts:test"
 coverage = "scripts:coverage"
+format = "scripts:format"
+lint = "scripts:lint"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -80,3 +83,21 @@ precision = 2
 
 [tool.coverage.html]
 directory = "htmlcov"
+
+[tool.black]
+line-length = 88
+target-version = ['py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
