@@ -272,6 +272,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Built with [pybind11](https://github.com/pybind/pybind11) for Python-C++ bindings
 - Uses [NumPy](https://numpy.org/) for efficient array operations
 - Developed with [Poetry](https://python-poetry.org/) for dependency management
+- Tested with Spectral Data from the [EPA Spectra](https://www3.epa.gov/ttn/emc/ftir/data.html) data set
 
 ## Support
 
