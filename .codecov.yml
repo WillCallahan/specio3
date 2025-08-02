@@ -1,0 +1,20 @@
+# Codecov configuration
+coverage:
+  status:
+    project:
+      default:
+        target: 80%
+        threshold: 1%
+    patch:
+      default:
+        target: 80%
+
+ignore:
+  - "tests/"
+  - "setup.py"
+  - "scripts.py"
+
+comment:
+  layout: "reach,diff,flags,tree"
+  behavior: default
+  require_changes: false
