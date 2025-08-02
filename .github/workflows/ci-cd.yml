@@ -51,6 +51,18 @@ jobs:
         virtualenvs-create: true
         virtualenvs-in-project: true
 
+    - name: Add Poetry to PATH (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
+        echo "$env:USERPROFILE\.local\bin" >> $env:GITHUB_PATH
+      shell: powershell
+
+    - name: Verify Poetry installation
+      run: |
+        poetry --version
+        which poetry || where poetry
+
     - name: Load cached venv
       id: cached-poetry-dependencies
       uses: actions/cache@v4
@@ -98,11 +110,26 @@ jobs:
 
     - name: Publish test results
       uses: EnricoMi/publish-unit-test-result-action@v2
-      if: always() && matrix.os == 'ubuntu-latest'
+      if: always()
       with:
         files: test-results.xml
         check_name: "Test Results (${{ matrix.os }}, Python ${{ matrix.python-version }})"
         github_token: ${{ secrets.GITHUB_TOKEN }}
+        comment_mode: create_new
+        compare_to_earlier_commit: false
+        pull_request_build: merge
+        report_individual_runs: true
+        deduplicate_classes_by_file_name: false
+
+    - name: Test Report Summary
+      uses: phoenix-actions/test-reporting@v12
+      if: always()
+      with:
+        name: "Test Results Summary (${{ matrix.os }}, Python ${{ matrix.python-version }})"
+        path: test-results.xml
+        reporter: java-junit
+        fail-on-error: false
+        output-to: step-summary
 
   build:
     name: Build distribution packages
