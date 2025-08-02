@@ -95,6 +95,16 @@ jobs:
     - name: Build C++ extension
       run: poetry run python setup.py build_ext --inplace
 
+    - name: List built extension files (debug)
+      run: |
+        echo "Contents of specio3/ directory after build:"
+        ls -l specio3/
+        echo "Current working directory: $(pwd)"
+
+    - name: Print sys.path and CWD before tests (debug)
+      run: |
+        python -c "import sys, os; print('sys.path:', sys.path); print('CWD:', os.getcwd())"
+
     - name: Run tests with coverage
       run: |
         poetry run python -m pytest tests/ -v --cov=specio3 --cov-report=xml --cov-report=html --cov-report=term-missing --junitxml=test-results.xml
