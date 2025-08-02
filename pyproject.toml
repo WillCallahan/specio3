@@ -1,0 +1,43 @@
+[project]
+name = "specio3"
+version = "0.1.0"
+description = "Spectral File Serializer"
+authors = [
+    { name = "William Callahan", email = "willcallahan94@att.net" }
+]
+license = "MIT"  # Replace with your actual license type (e.g., MIT, Apache-2.0, etc.)
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.20.0"
+]
+
+[tool.poetry]
+packages = [
+    { include = "specio3" }
+]
+
+[build-system]
+requires = [
+    "setuptools>=42",
+    "pybind11>=2.10.0",
+    "wheel"
+]
+build-backend = "setuptools.build_meta"
+
+[tool.poetry.build]
+generate-setup-file = false
+
+[tool.poetry.group.dev.dependencies]
+setuptools = "^80.9.0"
+pybind11 = "^3.0.0"
+pytest = "^8.0.0"
+
+[tool.poetry.scripts]
+clean = "scripts:clean"
+build = "scripts:build"
+rebuild = "scripts:rebuild"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
