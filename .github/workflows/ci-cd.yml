@@ -69,6 +69,21 @@ jobs:
       with:
         path: .venv
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock') }}
+        restore-keys: |
+          venv-${{ runner.os }}-${{ matrix.python-version }}-
+          venv-${{ runner.os }}-
+
+    - name: Cache build artifacts
+      uses: actions/cache@v4
+      with:
+        path: |
+          build/
+          specio3/*.so
+          specio3/*.pyd
+        key: build-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/*.cpp', '**/*.h', 'setup.py') }}
+        restore-keys: |
+          build-${{ runner.os }}-${{ matrix.python-version }}-
+          build-${{ runner.os }}-
 
     - name: Install dependencies
       if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'

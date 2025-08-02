@@ -2,6 +2,12 @@
 #include <pybind11/numpy.h>
 #include "spc_reader.h"
 
+// Windows compatibility: MSVC doesn't have ssize_t
+#ifdef _WIN32
+#include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
+#endif
+
 namespace py = pybind11;
 
 py::list read_spc_py(const std::string &path) {
