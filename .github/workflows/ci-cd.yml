@@ -21,7 +21,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -46,7 +46,7 @@ jobs:
 
     - name: Load cached venv
       id: cached-poetry-dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: .venv
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock') }}
@@ -72,14 +72,14 @@ jobs:
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v4
       with:
         file: ./coverage.xml
         flags: unittests
         name: codecov-umbrella
 
     - name: Upload test results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: test-results-${{ matrix.os }}-${{ matrix.python-version }}
@@ -105,7 +105,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.12'
 
@@ -131,7 +131,7 @@ jobs:
       run: twine check dist/*
 
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: dist-packages
         path: dist/
@@ -149,7 +149,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.12'
 
@@ -167,7 +167,7 @@ jobs:
         CIBW_TEST_COMMAND: pytest {project}/tests/ -v
 
     - name: Upload wheel artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: wheels-${{ matrix.os }}
         path: wheelhouse/*.whl
@@ -183,13 +183,15 @@ jobs:
 
     steps:
     - name: Download all artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
 
     - name: Combine all distributions
       run: |
         mkdir -p dist/
-        cp dist-packages/* dist/ 2>/dev/null || true
-        cp wheels-*/*.whl dist/ 2>/dev/null || true
+        find artifacts/ -name "*.whl" -exec cp {} dist/ \;
+        find artifacts/ -name "*.tar.gz" -exec cp {} dist/ \;
         ls -la dist/
 
     - name: Publish to Test PyPI
@@ -210,13 +212,15 @@ jobs:
 
     steps:
     - name: Download all artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
 
     - name: Combine all distributions
       run: |
         mkdir -p dist/
-        cp dist-packages/* dist/ 2>/dev/null || true
-        cp wheels-*/*.whl dist/ 2>/dev/null || true
+        find artifacts/ -name "*.whl" -exec cp {} dist/ \;
+        find artifacts/ -name "*.tar.gz" -exec cp {} dist/ \;
         ls -la dist/
 
     - name: Publish to PyPI
@@ -234,7 +238,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.12'
 
@@ -255,7 +259,7 @@ jobs:
         poetry run bandit -r specio3/ -f json -o bandit-report.json || true
 
     - name: Upload security scan results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: security-reports
