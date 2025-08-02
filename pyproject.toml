@@ -32,11 +32,14 @@ generate-setup-file = false
 setuptools = "^80.9.0"
 pybind11 = "^3.0.0"
 pytest = "^8.0.0"
+pytest-cov = "^6.2.1"
 
 [tool.poetry.scripts]
 clean = "scripts:clean"
 build = "scripts:build"
 rebuild = "scripts:rebuild"
+test = "scripts:test"
+coverage = "scripts:coverage"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

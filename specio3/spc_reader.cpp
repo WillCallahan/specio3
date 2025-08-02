@@ -157,13 +157,47 @@ std::vector<Spectrum> read_spc_multi(const std::string &path) {
     fin.read(main_hdr.data(), main_hdr.size());
     if (!fin) throw std::runtime_error("Failed to read main header");
 
+    // Define the constant here where it's used
+    const int32_t MAX_REASONABLE_POINTS = 10'000'000; // arbitrary guard
+
     // Parse primary flags
     uint8_t file_type_flag = static_cast<uint8_t>(main_hdr[0]);
     bool y16bit = (file_type_flag & 0x01) != 0;
     bool is_xy = (file_type_flag & 0x80) != 0;
     bool per_subfile_x = (file_type_flag & 0x40) != 0; // XYXY vs XYY
     // Always read as little-endian - number of points is at offset 1 (bytes 1-4)
-    int32_t global_num_points = read_le_int32(main_hdr.data() + 1);
+
+    // Try different interpretations of the point count field
+    // First, try reading as 32-bit from offset 1
+    int32_t raw_points = read_le_int32(main_hdr.data() + 1);
+    int32_t global_num_points = 0;
+
+    // Check if this looks like a reasonable value
+    if (raw_points > 0 && raw_points < MAX_REASONABLE_POINTS) {
+        global_num_points = raw_points;
+        std::cerr << "Using 32-bit point count: " << global_num_points << std::endl;
+    } else {
+        // Try reading just the first byte at offset 1
+        global_num_points = static_cast<uint8_t>(main_hdr[1]);
+        std::cerr << "32-bit value unreasonable (" << raw_points << "), trying 8-bit: " << global_num_points << std::endl;
+
+        // If that's too small, try 16-bit little-endian from offset 1
+        if (global_num_points < 10) {
+            uint16_t points_16 = static_cast<uint8_t>(main_hdr[1]) | (static_cast<uint8_t>(main_hdr[2]) << 8);
+            if (points_16 > 0 && points_16 < MAX_REASONABLE_POINTS) {
+                global_num_points = points_16;
+                std::cerr << "8-bit too small, using 16-bit: " << global_num_points << std::endl;
+            }
+        }
+    }
+
+    // Handle special cases in SPC format
+    if (global_num_points < 0) {
+        // Some SPC files use negative values for special encoding
+        global_num_points = -global_num_points;
+        std::cerr << "Warning: Negative point count converted to positive: " << global_num_points << std::endl;
+    }
+
     // Read num_subfiles as 2-byte little-endian at offset 0x1E (30)
     uint16_t raw_num_subfiles = static_cast<uint8_t>(main_hdr[30]) | (static_cast<uint8_t>(main_hdr[31]) << 8);
     bool is_multifile = (file_type_flag & 0x04) != 0;
@@ -176,7 +210,6 @@ std::vector<Spectrum> read_spc_multi(const std::string &path) {
         throw std::runtime_error(oss.str());
     }
     // Sanity cap: if ridiculously large, fail early with diagnostics
-    const int32_t MAX_REASONABLE_POINTS = 10'000'000; // arbitrary guard
     if (!is_multifile && global_num_points > MAX_REASONABLE_POINTS) {
         std::ostringstream oss;
         oss << "Unreasonable point count for single-spectrum SPC: " << global_num_points

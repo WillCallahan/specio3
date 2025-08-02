@@ -68,3 +68,19 @@ def rebuild():
     clean()
     os.system('python setup.py build_ext --inplace')
     print("Rebuild completed successfully!")
+
+
+def coverage():
+    """
+    Runs the test suite with coverage reporting.
+    """
+    os.system('python -m pytest --cov=specio3')
+    print("Coverage completed successfully!")
+
+
+def test():
+    """
+    Runs the test suite without coverage reporting.
+    """
+    os.system('python -m pytest -s -v')
+    print("Tests completed successfully!")
