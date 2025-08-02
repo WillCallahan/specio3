@@ -106,7 +106,7 @@ jobs:
         files: test-results.xml
         check_name: "Test Results (${{ matrix.os }}, Python ${{ matrix.python-version }})"
         github_token: ${{ secrets.GITHUB_TOKEN }}
-        comment_mode: create_new
+        comment_mode: changes
         compare_to_earlier_commit: false
         pull_request_build: merge
         report_individual_runs: true
