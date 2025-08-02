@@ -26,7 +26,7 @@ ext_modules = [
 if __name__ == "__main__":
     setup(
         name = "specio3",
-        version = "0.1.0",
+        version = "0.1.1",
         packages = ["specio3"],
         cmdclass = {"build_ext": build_ext},
         zip_safe = False,

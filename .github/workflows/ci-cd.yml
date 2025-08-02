@@ -294,6 +294,8 @@ jobs:
         password: ${{ secrets.TEST_PYPI_API_TOKEN }}
         repository-url: https://test.pypi.org/legacy/
         skip-existing: true
+        verbose: true
+        print-hash: true
 
   deploy-pypi:
     name: Deploy to PyPI
