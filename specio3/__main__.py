@@ -4,7 +4,7 @@ import csv
 
 if __name__ == '__main__':
     print("Reading SPC file...")
-    data = specio3.read_spc('/Users/william/PycharmProjects/specio3/tests/data/cts0829b.spc')[0]
+    data = specio3.read_spc('/Users/william/PycharmProjects/specio3/tests/data/022b4asf.spc')[0]
 
     print(f"X array length: {len(data[0])}")
     print(f"Y array length: {len(data[1])}")

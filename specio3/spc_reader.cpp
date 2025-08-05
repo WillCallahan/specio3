@@ -1,271 +1,311 @@
-#include "spc_reader.h"
-#include <array>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+
 #include <fstream>
-#include <sstream>
+#include <vector>
+#include <string>
 #include <stdexcept>
 #include <cstring>
-#include <cstdint>
-#include <cmath>
-#include <iostream>
-#include <iomanip>
-#include <filesystem>
+#include <sstream>
 
-namespace spc_reader {
+namespace py = pybind11;
 
-// Helper to get remaining bytes from current position
-static std::streamoff remaining_bytes(std::ifstream &fin) {
-    std::streampos cur = fin.tellg();
-    fin.seekg(0, std::ios::end);
-    std::streampos end = fin.tellg();
-    fin.seekg(cur);
-    return static_cast<std::streamoff>(end - cur);
+static std::string human_offset(std::streamoff o) {
+    std::ostringstream ss;
+    ss << o;
+    return ss.str();
 }
 
-// Dump the first N bytes of the header for debugging (hex)
-static void dump_header_debug(const std::array<char, 512> &hdr, size_t n = 64) {
-    std::cerr << "SPC header (first " << n << " bytes):\n";
-    for (size_t i = 0; i < n; ++i) {
-        if (i % 16 == 0) std::cerr << std::setw(4) << std::setfill('0') << i << ": ";
-        std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                  << (static_cast<uint8_t>(hdr[i]) & 0xFF) << ' ';
-        if ((i + 1) % 16 == 0) std::cerr << '\n';
+// Helpers for reading little-endian values (assuming host is little-endian; if not, you need byte-swapping)
+template <typename T>
+T read_le(const char* buffer) {
+    T v;
+    std::memcpy(&v, buffer, sizeof(T));
+    return v;
+}
+
+struct Subfile {
+    std::vector<double> x;
+    std::vector<double> y;
+    float z_start = 0;
+    float z_end = 0;
+};
+
+struct SPCFile {
+    bool is_multifile = false;
+    bool is_xy = false;
+    bool is_xyxy = false;
+    bool y_in_16bit = false;
+    uint32_t num_points = 0;
+    uint32_t num_subfiles = 0;
+    double first_x = 0;
+    double last_x = 0;
+    std::vector<Subfile> subfiles;
+    std::string log_text;
+};
+
+static double apply_y_scaling_uint32(uint32_t integer_y, int8_t exponent_byte, bool is_16bit) {
+    double divisor = is_16bit ? static_cast<double>(1ULL << 16) : static_cast<double>(1ULL << 32);
+    double scale = std::pow(2.0, static_cast<int>(exponent_byte));
+    return (scale * static_cast<double>(integer_y)) / divisor;
+}
+
+static double apply_y_scaling_uint16(uint16_t integer_y, int8_t exponent_byte) {
+    constexpr auto divisor = static_cast<double>(1ULL << 16);
+    const double scale = std::pow(2.0, static_cast<int>(exponent_byte));
+    return (scale * static_cast<double>(integer_y)) / divisor;
+}
+
+SPCFile read_spc_impl(const std::string& filename) {
+    std::ifstream f(filename, std::ios::binary);
+    if (!f) {
+        throw std::runtime_error("Unable to open file: " + filename);
     }
-    std::cerr << std::dec << "\n";
-}
 
-// Helper: read little-endian 4-byte int from buffer
-static int32_t read_le_int32(const char *buf) {
-    uint8_t b0 = static_cast<uint8_t>(buf[0]);
-    uint8_t b1 = static_cast<uint8_t>(buf[1]);
-    uint8_t b2 = static_cast<uint8_t>(buf[2]);
-    uint8_t b3 = static_cast<uint8_t>(buf[3]);
-    return static_cast<int32_t>(b0 | (b1 << 8) | (b2 << 16) | (b3 << 24));
-}
-
-// Helper: read little-endian 4-byte float from buffer
-static float read_le_float(const char *buf) {
-    uint32_t bits = 0;
-    for (int i = 0; i < 4; ++i) {
-        bits |= (static_cast<uint32_t>(static_cast<uint8_t>(buf[i])) << (i * 8));
-    }
-    float result;
-    std::memcpy(&result, &bits, sizeof(float));
-    return result;
-}
-
-// Helper: read little-endian 8-byte double from buffer
-static double read_le_double(const char *buf) {
-    uint64_t bits = 0;
-    for (int i = 0; i < 8; ++i) {
-        bits |= (static_cast<uint64_t>(static_cast<uint8_t>(buf[i])) << (i * 8));
-    }
-    double result;
-    std::memcpy(&result, &bits, sizeof(double));
-    return result;
-}
-
-std::map<std::string, Spectrum> read_spc(const std::string &path) {
-    std::ifstream fin(path, std::ios::binary);
-    if (!fin) {
-        throw std::runtime_error("Failed to open SPC file: " + path);
-    }
+    SPCFile out;
 
     // Read main header (512 bytes)
-    std::array<char, 512> main_hdr;
-    fin.read(main_hdr.data(), main_hdr.size());
-    if (!fin) throw std::runtime_error("Failed to read main header");
-
-    // Parse file type flags
-    uint8_t file_type_flag = static_cast<uint8_t>(main_hdr[0]);
-    bool y16bit = (file_type_flag & 0x01) != 0;
-    bool is_xy = (file_type_flag & 0x80) != 0;
-    bool per_subfile_x = (file_type_flag & 0x40) != 0;
-    bool is_multifile = (file_type_flag & 0x04) != 0;
-
-    std::cerr << "SPC file_type_flag: 0x" << std::hex << (int)file_type_flag << std::dec << std::endl;
-    std::cerr << "y16bit: " << y16bit << ", is_xy: " << is_xy << ", per_subfile_x: " << per_subfile_x << ", is_multifile: " << is_multifile << std::endl;
-
-    // Based on the hex dump analysis:
-    // 00 4d ff ff 00 a1 01 47 18 86 89 45 81 8f c8 43
-    // The number of points appears to be at offset 1 as a single byte: 0x4d = 77 decimal
-    uint8_t version_or_points = static_cast<uint8_t>(main_hdr[1]);
-    int32_t global_num_points = version_or_points;
-
-    std::cerr << "Points from offset 1 (single byte): " << global_num_points << std::endl;
-
-    // If that's unreasonably small, try reading more bytes
-    if (global_num_points < 10) {
-        // Try reading as 16-bit little-endian from offset 1
-        uint16_t points_16 = static_cast<uint8_t>(main_hdr[1]) | (static_cast<uint8_t>(main_hdr[2]) << 8);
-        if (points_16 > 10 && points_16 < 10000) {
-            global_num_points = points_16;
-            std::cerr << "Using 16-bit value: " << global_num_points << std::endl;
-        }
+    std::vector<char> mainhdr_buf(512);
+    f.read(mainhdr_buf.data(), 512);
+    if (f.gcount() != 512) {
+        throw std::runtime_error("Failed to read full main header (expected 512 bytes, got " + std::to_string(f.gcount()) + ")");
     }
 
-    // Final validation
-    if (global_num_points <= 0 || global_num_points > 10000) {
-        dump_header_debug(main_hdr);
-        std::cerr << "Cannot determine point count, using reasonable default" << std::endl;
-        global_num_points = 512; // Common spectral size
+    // Parse fields from main header.
+    // NOTE: Offsets are based on the specification PDF. If your version differs adjust offsets accordingly.
+    auto file_type_flag = static_cast<uint8_t>(mainhdr_buf[0]);
+    out.is_multifile = (file_type_flag & 0x10) != 0;
+    out.is_xy = (file_type_flag & 0x80) != 0;
+    bool has_per_subfile_x = (file_type_flag & 0x40) != 0; // indicates XYXY multifile when combined
+    out.is_xyxy = out.is_multifile && out.is_xy && has_per_subfile_x;
+    out.y_in_16bit = (file_type_flag & 0x01) != 0;
+
+    // Global exponent for Y (signed). Spec uses 0x80 (-128) to denote float.
+    int8_t global_exponent_y = static_cast<int8_t>(mainhdr_buf[5]);
+
+    // Number of points (if not XYXY) at offset 4, little-endian 32-bit
+    out.num_points = read_le<uint32_t>(mainhdr_buf.data() + 4);
+    // First X at offset 8 (double), Last X at offset 16
+    out.first_x = read_le<double>(mainhdr_buf.data() + 8);
+    out.last_x = read_le<double>(mainhdr_buf.data() + 16);
+    // Number of subfiles: offset 23 according to earlier parsing logic; if wrong, adjust per your spec.
+    out.num_subfiles = read_le<uint32_t>(mainhdr_buf.data() + 23);
+    auto log_block_offset = read_le<uint32_t>(mainhdr_buf.data() + 246);
+
+    // Shared X array (for XY / XYY) if applicable
+    std::vector<double> shared_x;
+    // Defensive: ensure out.num_points is initialized before use
+    // (It is set above from the file header, but some static analyzers may warn)
+    // If you want to silence such warnings, you can add an assert:
+    if (out.is_xy && out.num_points == 0) {
+        throw std::runtime_error("num_points is zero but expected >0 for XY-type file.");
     }
-
-    std::cerr << "Final point count: " << global_num_points << std::endl;
-
-    // For X-axis range, the hex shows values at offsets 8-15:
-    // 18 86 89 45 81 8f c8 43
-    // This looks like two 4-byte IEEE floats
-    float first_x_f = read_le_float(main_hdr.data() + 8);  // 18 86 89 45
-    float last_x_f = read_le_float(main_hdr.data() + 12); // 81 8f c8 43
-
-    double first_x = static_cast<double>(first_x_f);
-    double last_x = static_cast<double>(last_x_f);
-
-    std::cerr << "Raw X range floats: " << first_x_f << " to " << last_x_f << std::endl;
-    std::cerr << "X range: " << first_x << " to " << last_x << std::endl;
-
-    // Validate and potentially fix X range
-    if (std::isnan(first_x) || std::isnan(last_x) || std::isinf(first_x) || std::isinf(last_x) ||
-        first_x == last_x || std::abs(first_x) > 1e6 || std::abs(last_x) > 1e6) {
-        std::cerr << "Invalid X range detected, generating default range" << std::endl;
-        // For typical IR spectroscopy: 4000 to 400 cm-1
-        first_x = 4000.0;
-        last_x = 400.0;
-    }
-
-    std::vector<double> x_values;
-    std::vector<double> y_values;
-
-    // Generate X values
-    if (global_num_points > 1) {
-        double delta = (last_x - first_x) / (global_num_points - 1);
-        x_values.reserve(global_num_points);
-        for (int i = 0; i < global_num_points; ++i) {
-            x_values.push_back(first_x + delta * i);
-        }
-    } else {
-        x_values.push_back(first_x);
-    }
-
-    // For Y data, start after the 512-byte header
-    std::streampos data_pos = 512;
-
-    // Skip subheader if present
-    data_pos += 32;
-
-    // Read Y values
-    fin.seekg(data_pos);
-    if (!fin) throw std::runtime_error("Failed to seek to Y data");
-
-    std::streamoff available_bytes = remaining_bytes(fin);
-    std::cerr << "Available bytes for Y data: " << available_bytes << std::endl;
-
-    // Try different Y data formats
-    bool y_read_success = false;
-
-    // Try reading as 32-bit integers first (most common)
-    if (!y_read_success && available_bytes >= static_cast<std::streamoff>(sizeof(uint32_t) * global_num_points)) {
-        std::cerr << "Attempting to read Y as 32-bit integers" << std::endl;
-        std::vector<uint32_t> y_buffer(global_num_points);
-        fin.read(reinterpret_cast<char*>(y_buffer.data()), sizeof(uint32_t) * global_num_points);
-        if (fin) {
-            y_values.reserve(global_num_points);
-            for (const auto& y : y_buffer) {
-                // Scale down large integer values
-                double scaled_y = static_cast<double>(y);
-                if (scaled_y > 1e6) {
-                    scaled_y /= 1e6; // Scale down very large values
+    if (!out.is_xyxy) {
+        if (out.is_xy) {
+            // Shared X array of floats comes immediately after main header
+            shared_x.resize(out.num_points);
+            for (uint32_t i = 0; i < out.num_points; ++i) {
+                float xv;
+                f.read(reinterpret_cast<char*>(&xv), sizeof(float));
+                if (!f) {
+                    throw std::runtime_error("Failed reading shared X array at point " + std::to_string(i) +
+                                             ", file offset " + human_offset(f.tellg()));
                 }
-                y_values.push_back(scaled_y);
+                shared_x[i] = static_cast<double>(xv);
             }
-            y_read_success = true;
-            std::cerr << "Successfully read Y as 32-bit integers" << std::endl;
+            if (!shared_x.empty()) {
+                out.first_x = shared_x.front();
+                out.last_x = shared_x.back();
+            }
+        }
+    }
+
+    // Read all subheaders (each is 32 bytes)
+    struct SubHeaderRaw {
+        uint8_t subfile_flags;       // 1 byte
+        int8_t subfile_exponent;     // 1 byte (signed; -128 == float Y)
+        uint16_t subfile_index;      // 2 bytes
+        float z_start;               // 4 bytes
+        float z_end;                 // 4 bytes
+        float noise;                // 4 bytes
+        uint32_t num_points_xyxy;    // 4 bytes
+        uint32_t num_coadded_scans;  // 4 bytes
+        float w_axis_value;          // 4 bytes
+        char reserved[4];            // 4 bytes
+    };
+    static_assert(sizeof(SubHeaderRaw) == 32, "SubheaderRaw must be 32 bytes");
+
+    std::vector<SubHeaderRaw> subhdrs;
+    subhdrs.reserve(out.num_subfiles);
+    for (uint32_t i = 0; i < out.num_subfiles; ++i) {
+        SubHeaderRaw sh;
+        f.read(reinterpret_cast<char*>(&sh), sizeof(SubHeaderRaw));
+        if (!f) {
+            std::ostringstream err;
+            err << "Failed reading subheader " << i << " at offset " << human_offset(f.tellg());
+            throw std::runtime_error(err.str());
+        }
+        subhdrs.push_back(sh);
+    }
+
+    // Determine if global Y is float
+    bool global_float_y = (global_exponent_y == static_cast<int8_t>(-128));
+
+    // Prepare subfiles container
+    out.subfiles.resize(out.num_subfiles);
+    for (uint32_t si = 0; si < out.num_subfiles; ++si) {
+        const SubHeaderRaw& sh = subhdrs[si];
+        Subfile& s = out.subfiles[si];
+        s.z_start = sh.z_start;
+        s.z_end = sh.z_end;
+
+        bool subfile_float_y = (sh.subfile_exponent == static_cast<int8_t>(-128));
+        int8_t exponent_to_use = subfile_float_y ? 0 : sh.subfile_exponent;
+        bool use_float_y = subfile_float_y || global_float_y;
+
+        uint32_t this_num_points = out.num_points;
+        if (out.is_xyxy) {
+            this_num_points = sh.num_points_xyxy;
+        }
+
+        if (this_num_points == 0) {
+            std::ostringstream err;
+            err << "Subfile " << si << " has zero points (this_num_points==0)";
+            throw std::runtime_error(err.str());
+        }
+
+        // X axis per subfile
+        if (out.is_xyxy) {
+            s.x.resize(this_num_points);
+            for (uint32_t i = 0; i < this_num_points; ++i) {
+                float xv;
+                f.read(reinterpret_cast<char*>(&xv), sizeof(float));
+                if (!f) {
+                    std::ostringstream err;
+                    err << "Failed reading XYXY subfile X data for subfile " << si << " at point " << i
+                        << " offset " << human_offset(f.tellg());
+                    throw std::runtime_error(err.str());
+                }
+                s.x[i] = static_cast<double>(xv);
+            }
+        } else if (out.is_xy) {
+            s.x = shared_x;
         } else {
-            fin.clear();
-            fin.seekg(data_pos);
-        }
-    }
-
-    // Try reading as floats
-    if (!y_read_success && available_bytes >= static_cast<std::streamoff>(sizeof(float) * global_num_points)) {
-        std::cerr << "Attempting to read Y as floats" << std::endl;
-        std::vector<float> y_buffer(global_num_points);
-        fin.read(reinterpret_cast<char*>(y_buffer.data()), sizeof(float) * global_num_points);
-        if (fin) {
-            y_values.reserve(global_num_points);
-            for (const auto& y : y_buffer) {
-                y_values.push_back(static_cast<double>(y));
+            // Y-only: generate linearly spaced X
+            s.x.resize(out.num_points);
+            if (out.num_points > 1) {
+                double step = (out.last_x - out.first_x) / static_cast<double>(out.num_points - 1);
+                for (uint32_t i = 0; i < out.num_points; ++i) {
+                    s.x[i] = out.first_x + step * i;
+                }
+            } else {
+                s.x[0] = out.first_x;
             }
-            y_read_success = true;
-            std::cerr << "Successfully read Y as floats" << std::endl;
+        }
+
+        // Y values
+        s.y.resize(this_num_points);
+        if (use_float_y) {
+            for (uint32_t i = 0; i < this_num_points; ++i) {
+                float yv;
+                f.read(reinterpret_cast<char*>(&yv), sizeof(float));
+                if (!f) {
+                    std::ostringstream err;
+                    err << "Failed reading float Y values for subfile " << si << " at point " << i
+                        << " offset " << human_offset(f.tellg());
+                    throw std::runtime_error(err.str());
+                }
+                s.y[i] = static_cast<double>(yv);
+            }
         } else {
-            fin.clear();
-            fin.seekg(data_pos);
-        }
-    }
-
-    // Try reading as 16-bit integers
-    if (!y_read_success && available_bytes >= static_cast<std::streamoff>(sizeof(uint16_t) * global_num_points)) {
-        std::cerr << "Attempting to read Y as 16-bit integers" << std::endl;
-        std::vector<uint16_t> y_buffer(global_num_points);
-        fin.read(reinterpret_cast<char*>(y_buffer.data()), sizeof(uint16_t) * global_num_points);
-        if (fin) {
-            y_values.reserve(global_num_points);
-            for (const auto& y : y_buffer) {
-                y_values.push_back(static_cast<double>(y));
+            if (out.y_in_16bit) {
+                for (uint32_t i = 0; i < this_num_points; ++i) {
+                    uint16_t iv;
+                    f.read(reinterpret_cast<char*>(&iv), sizeof(uint16_t));
+                    if (!f) {
+                        std::ostringstream err;
+                        err << "Failed reading 16-bit integer Y for subfile " << si << " at point " << i
+                            << " offset " << human_offset(f.tellg());
+                        throw std::runtime_error(err.str());
+                    }
+                    s.y[i] = apply_y_scaling_uint16(iv, exponent_to_use);
+                }
+            } else {
+                for (uint32_t i = 0; i < this_num_points; ++i) {
+                    uint32_t iv;
+                    f.read(reinterpret_cast<char*>(&iv), sizeof(uint32_t));
+                    if (!f) {
+                        std::ostringstream err;
+                        err << "Failed reading 32-bit integer Y for subfile " << si << " at point " << i
+                            << " offset " << human_offset(f.tellg());
+                        throw std::runtime_error(err.str());
+                    }
+                    s.y[i] = apply_y_scaling_uint32(iv, exponent_to_use, false);
+                }
             }
-            y_read_success = true;
-            std::cerr << "Successfully read Y as 16-bit integers" << std::endl;
         }
     }
 
-    if (!y_read_success) {
-        throw std::runtime_error("Failed to read Y data in any supported format");
+    // Read log text if present
+    if (log_block_offset != 0) {
+        f.seekg(static_cast<std::streamoff>(log_block_offset), std::ios::beg);
+        if (!f) {
+            throw std::runtime_error("Failed to seek to log block offset: " + std::to_string(log_block_offset));
+        }
+
+        // Minimal log header reading (assuming fixed layout)
+        struct LogHeaderRaw {
+            uint32_t log_block_size;
+            uint32_t memory_block_size;
+            uint32_t offset_to_text;
+            uint32_t binary_log_size;
+            uint32_t disk_area_size;
+            char reserved[44];
+        };
+        static_assert(sizeof(LogHeaderRaw) == 64, "Unexpected log header size");
+        LogHeaderRaw loghdr;
+        f.read(reinterpret_cast<char*>(&loghdr), sizeof(LogHeaderRaw));
+        if (!f) {
+            throw std::runtime_error("Failed reading log header at offset " + human_offset(f.tellg()));
+        }
+
+        uint32_t text_offset_within_log = loghdr.offset_to_text;
+        if (text_offset_within_log != 0 && loghdr.log_block_size > text_offset_within_log) {
+            uint32_t ascii_log_size = loghdr.log_block_size - text_offset_within_log;
+            f.seekg(static_cast<std::streamoff>(log_block_offset + text_offset_within_log), std::ios::beg);
+            std::vector<char> logtext_buf(ascii_log_size);
+            f.read(logtext_buf.data(), ascii_log_size);
+            size_t actually_read = f.gcount();
+            if (actually_read > 0) {
+                out.log_text.assign(logtext_buf.data(), actually_read);
+            }
+        }
     }
 
-    std::cerr << "Successfully read " << x_values.size() << " X values and " << y_values.size() << " Y values" << std::endl;
-
-    // Validate data ranges
-    if (!y_values.empty()) {
-        double min_y = *std::min_element(y_values.begin(), y_values.end());
-        double max_y = *std::max_element(y_values.begin(), y_values.end());
-        std::cerr << "Y data range: " << min_y << " to " << max_y << std::endl;
-    }
-
-    // Extract filename for map key
-    std::filesystem::path file_path(path);
-    std::string filename = file_path.filename().string();
-
-    std::map<std::string, Spectrum> result;
-    result[filename] = std::make_pair(std::move(x_values), std::move(y_values));
-
-    return result;
+    return out;
 }
 
-std::map<std::string, Spectrum> read_spc_dir(const std::string& directory,
-                                             const std::string& ext,
-                                             const std::string& orient) {
-    std::map<std::string, Spectrum> spectra_map;
+py::dict to_pydict(const SPCFile& spc) {
+    py::dict d;
+    d["is_multifile"] = spc.is_multifile;
+    d["is_xy"] = spc.is_xy;
+    d["is_xyxy"] = spc.is_xyxy;
+    d["y_in_16bit"] = spc.y_in_16bit;
+    d["num_points"] = spc.num_points;
+    d["num_subfiles"] = spc.num_subfiles;
+    d["first_x"] = spc.first_x;
+    d["last_x"] = spc.last_x;
+    d["log_text"] = spc.log_text;
 
-    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
-        if (!entry.is_regular_file()) continue;
-
-        const std::string fname = entry.path().filename().string();
-        if (entry.path().extension() != ext) continue;
-
-        try {
-            auto file_spectra = read_spc(entry.path().string());
-            // Merge the results
-            for (const auto& [key, spectrum] : file_spectra) {
-                spectra_map[fname] = spectrum;
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "Failed to parse SPC file: " << fname << " - " << e.what() << "\n";
-            continue;
-        }
+    py::list subs;
+    for (const auto&[x, y, z_start, z_end] : spc.subfiles) {
+        py::dict sd;
+        sd["x"] = x;
+        sd["y"] = y;
+        sd["z_start"] = z_start;
+        sd["z_end"] = z_end;
+        subs.append(sd);
     }
-
-    return spectra_map;
+    d["subfiles"] = subs;
+    return d;
 }
-
-} // namespace spc_reader
