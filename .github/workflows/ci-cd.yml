@@ -276,6 +276,9 @@ jobs:
         CIBW_BEFORE_BUILD_WINDOWS: |
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install --only-binary=numpy,scipy pybind11 numpy
+        # Windows-specific settings
+        CIBW_BEFORE_ALL_WINDOWS: |
+          choco install visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --includeOptional --passive" || echo "VS Build Tools already installed"
         CIBW_BUILD_VERBOSITY: 1
         # Skip wheel testing entirely - we already test in the main test job
         CIBW_TEST_SKIP: "*"
@@ -285,7 +288,7 @@ jobs:
         # Speed up builds by using parallel compilation
         CIBW_ENVIRONMENT_LINUX: "CMAKE_BUILD_PARALLEL_LEVEL=4 MAKEFLAGS=-j4"
         CIBW_ENVIRONMENT_MACOS: "CMAKE_BUILD_PARALLEL_LEVEL=4 MAKEFLAGS=-j4"
-        CIBW_ENVIRONMENT_WINDOWS: "CMAKE_BUILD_PARALLEL_LEVEL=4"
+        CIBW_ENVIRONMENT_WINDOWS: "CMAKE_BUILD_PARALLEL_LEVEL=4 DISTUTILS_USE_SDK=1 MSSdk=1"
         # Additional optimizations
         CIBW_ENVIRONMENT: "PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1"
 
