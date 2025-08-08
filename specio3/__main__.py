@@ -4,7 +4,7 @@ import csv
 
 if __name__ == '__main__':
     print("Reading SPC file...")
-    data = specio3.read_spc('/Users/william/PycharmProjects/specio3/tests/data/022b4asf.spc')[0]
+    data = specio3.read_spc('/Users/william/PycharmProjects/specio3/tests/data/103b4anh.spc')[0]
 
     print(f"X array length: {len(data[0])}")
     print(f"Y array length: {len(data[1])}")
@@ -18,6 +18,7 @@ if __name__ == '__main__':
         writer.writerow(['x', 'y'])  # Header
         zipped = zip(data[0], data[1])
         for x, y in zipped:
-            writer.writerow([f'{x:.0f}', f'{y}'])
+            # writer.writerow([f'{x:.0f}', f'{y}'])
+            writer.writerow([x, y])
 
     print(f"CSV file written with {len(data[0])} data points")

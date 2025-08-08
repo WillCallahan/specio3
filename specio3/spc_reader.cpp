@@ -45,9 +45,6 @@ struct SPCFile {
 };
 
 static double apply_y_scaling_uint32(uint32_t integer_y, int8_t exponent_byte, bool is_16bit) {
-    // Convert unsigned to signed
-    int32_t signed_y = static_cast<int32_t>(integer_y);
-    
     // For SPC files, if exponent is -128, it indicates float data
     if (exponent_byte == -128) {
         // Reinterpret the integer as a float
@@ -56,12 +53,12 @@ static double apply_y_scaling_uint32(uint32_t integer_y, int8_t exponent_byte, b
         return static_cast<double>(float_val);
     }
     
-    // For integer data, use a reasonable scaling
-    // The exponent in SPC files is typically used as a power of 2 divisor
-    // But the values we're seeing suggest we need a different approach
-    // Let's try a simple scaling that brings the values to a reasonable range
-    double scale = 1.0 / (1ULL << 20);  // Divide by 2^20 to bring large integers to reasonable range
-    return scale * static_cast<double>(signed_y);
+    // Convert unsigned to signed
+    int32_t signed_y = static_cast<int32_t>(integer_y);
+    
+    // Use the correct SPC scaling formula: Y = integer / (2^(32-exponent))
+    double divisor = std::pow(2.0, 32 - static_cast<int>(exponent_byte));
+    return static_cast<double>(signed_y) / divisor;
 }
 
 static double apply_y_scaling_uint16(uint16_t integer_y, int8_t exponent_byte) {
@@ -73,9 +70,28 @@ static double apply_y_scaling_uint16(uint16_t integer_y, int8_t exponent_byte) {
         return static_cast<double>(signed_y);
     }
     
-    // Simple scaling for 16-bit data
-    double scale = 1.0 / (1ULL << 10);  // Divide by 2^10
-    return scale * static_cast<double>(signed_y);
+    // Use the correct SPC scaling formula: Y = integer / (2^(16-exponent))
+    double divisor = std::pow(2.0, 16 - static_cast<int>(exponent_byte));
+    return static_cast<double>(signed_y) / divisor;
+}
+
+// Special handling for old format (0x4D) Y-data with byte swapping
+static double apply_y_scaling_old_format(const char* y_bytes, int8_t exponent_byte) {
+    // For old format, swap 1st and 2nd byte, as well as 3rd and 4th byte
+    uint8_t b0 = static_cast<uint8_t>(y_bytes[0]);
+    uint8_t b1 = static_cast<uint8_t>(y_bytes[1]);
+    uint8_t b2 = static_cast<uint8_t>(y_bytes[2]);
+    uint8_t b3 = static_cast<uint8_t>(y_bytes[3]);
+    
+    // Reconstruct integer with byte swapping
+    uint32_t swapped_int = (b1 << 24) + (b0 << 16) + (b3 << 8) + b2;
+    
+    // Convert to signed
+    int32_t signed_y = static_cast<int32_t>(swapped_int);
+    
+    // Apply scaling: Y = integer / (2^(32-exponent))
+    double divisor = std::pow(2.0, 32 - static_cast<int>(exponent_byte));
+    return static_cast<double>(signed_y) / divisor;
 }
 
 SPCFile read_spc_impl(const std::string& filename) {
@@ -91,16 +107,30 @@ SPCFile read_spc_impl(const std::string& filename) {
     std::streamsize file_size = f.tellg();
     f.seekg(0, std::ios::beg);
 
-    // Read main header (512 bytes)
-    std::vector<char> mainhdr_buf(512);
-    f.read(mainhdr_buf.data(), 512);
-    if (f.gcount() != 512) {
-        throw std::runtime_error("Failed to read full main header (expected 512 bytes, got " + std::to_string(f.gcount()) + ")");
+    // Read first 2 bytes to determine format
+    char format_bytes[2];
+    f.read(format_bytes, 2);
+    if (f.gcount() != 2) {
+        throw std::runtime_error("Failed to read format bytes");
+    }
+    
+    // Determine format and header size
+    auto version_byte = static_cast<uint8_t>(format_bytes[1]);
+    bool is_old_format = (version_byte == 0x4D);
+    uint32_t header_size = is_old_format ? 256 : 512;
+    
+    // Go back to beginning and read full header
+    f.seekg(0, std::ios::beg);
+    std::vector<char> mainhdr_buf(header_size);
+    f.read(mainhdr_buf.data(), header_size);
+    if (f.gcount() != static_cast<std::streamsize>(header_size)) {
+        throw std::runtime_error("Failed to read full main header (expected " + std::to_string(header_size) + " bytes, got " + std::to_string(f.gcount()) + ")");
     }
 
     // Parse fields from main header according to SPC specification
     // Byte 0: File type flags
     auto file_type_flag = static_cast<uint8_t>(mainhdr_buf[0]);
+    
     out.is_multifile = (file_type_flag & 0x10) != 0;
     out.is_xy = (file_type_flag & 0x80) != 0;
     bool has_per_subfile_x = (file_type_flag & 0x40) != 0;
@@ -109,25 +139,35 @@ SPCFile read_spc_impl(const std::string& filename) {
 
     // Byte 1: Global exponent for Y (signed). Spec uses 0x80 (-128) to denote float.
     int8_t global_exponent_y = static_cast<int8_t>(mainhdr_buf[1]);
-
-    // For Y-only files, calculate number of points from file size
-    if (!out.is_xy) {
-        std::streamsize data_size = file_size - 512;  // Subtract header size
-        if (out.y_in_16bit) {
-            out.num_points = static_cast<uint32_t>(data_size / 2);
-        } else {
-            out.num_points = static_cast<uint32_t>(data_size / 4);
-        }
+    
+    // For old format, exponent is at offset 2-3 (16-bit)
+    if (is_old_format) {
+        global_exponent_y = read_le<int16_t>(mainhdr_buf.data() + 2);
+        // For old format: onpts at offset 4-7, ofirst at 8-11, olast at 12-15
+        out.num_points = static_cast<uint32_t>(read_le<float>(mainhdr_buf.data() + 4));
+        out.first_x = static_cast<double>(read_le<float>(mainhdr_buf.data() + 8));
+        out.last_x = static_cast<double>(read_le<float>(mainhdr_buf.data() + 12));
     } else {
-        // For XY files, read from header at offset 2-3
-        out.num_points = read_le<uint16_t>(mainhdr_buf.data() + 2);
+        global_exponent_y = static_cast<int8_t>(mainhdr_buf[1]);
+        // For Y-only files, calculate number of points from file size
+        if (!out.is_xy) {
+            std::streamsize data_size = file_size - header_size;
+            if (out.y_in_16bit) {
+                out.num_points = static_cast<uint32_t>(data_size / 2);
+            } else {
+                out.num_points = static_cast<uint32_t>(data_size / 4);
+            }
+        } else {
+            // For XY files, read from header
+            out.num_points = read_le<uint16_t>(mainhdr_buf.data() + 2);
+        }
+        
+        // Bytes 8-11: First X (float, little-endian)
+        out.first_x = static_cast<double>(read_le<float>(mainhdr_buf.data() + 8));
+        
+        // Bytes 12-15: Last X (float, little-endian)  
+        out.last_x = static_cast<double>(read_le<float>(mainhdr_buf.data() + 12));
     }
-    
-    // Bytes 8-11: First X (float, little-endian)
-    out.first_x = static_cast<double>(read_le<float>(mainhdr_buf.data() + 8));
-    
-    // Bytes 12-15: Last X (float, little-endian)  
-    out.last_x = static_cast<double>(read_le<float>(mainhdr_buf.data() + 12));
     
     // For single file, num_subfiles is 1
     if (!out.is_multifile) {
@@ -287,16 +327,33 @@ SPCFile read_spc_impl(const std::string& filename) {
                     s.y[i] = apply_y_scaling_uint16(iv, exponent_to_use);
                 }
             } else {
-                for (uint32_t i = 0; i < this_num_points; ++i) {
-                    uint32_t iv;
-                    f.read(reinterpret_cast<char*>(&iv), sizeof(uint32_t));
-                    if (!f) {
-                        std::ostringstream err;
-                        err << "Failed reading 32-bit integer Y for subfile " << si << " at point " << i
-                            << " offset " << human_offset(f.tellg());
-                        throw std::runtime_error(err.str());
+                // 32-bit integer Y data
+                if (is_old_format) {
+                    // Old format requires special byte swapping
+                    for (uint32_t i = 0; i < this_num_points; ++i) {
+                        char y_bytes[4];
+                        f.read(y_bytes, 4);
+                        if (!f) {
+                            std::ostringstream err;
+                            err << "Failed reading 32-bit integer Y for subfile " << si << " at point " << i
+                                << " offset " << human_offset(f.tellg());
+                            throw std::runtime_error(err.str());
+                        }
+                        s.y[i] = apply_y_scaling_old_format(y_bytes, exponent_to_use);
                     }
-                    s.y[i] = apply_y_scaling_uint32(iv, exponent_to_use, false);
+                } else {
+                    // New format - standard reading
+                    for (uint32_t i = 0; i < this_num_points; ++i) {
+                        uint32_t iv;
+                        f.read(reinterpret_cast<char*>(&iv), sizeof(uint32_t));
+                        if (!f) {
+                            std::ostringstream err;
+                            err << "Failed reading 32-bit integer Y for subfile " << si << " at point " << i
+                                << " offset " << human_offset(f.tellg());
+                            throw std::runtime_error(err.str());
+                        }
+                        s.y[i] = apply_y_scaling_uint32(iv, exponent_to_use, false);
+                    }
                 }
             }
         }
