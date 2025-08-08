@@ -180,15 +180,15 @@ Performance benchmarks on real SPC files from the test suite (macOS M1, 12 CPU c
 
 #### Comparison with spectrochempy
 
-specio3 significantly outperforms the reference implementation:
+specio3 significantly outperforms the reference implementation from [spectrochempy](https://github.com/spectrochempy/spectrochempy):
 
 | File | Size | specio3 | spectrochempy | Speedup |
 |------|------|---------|---------------|---------|
-| 103b4anh.spc | 131 KB | 2.1 ms | 8.4 ms | **3.8x faster** |
-| 087b4ana.spc | 258 KB | 4.1 ms | 14.5 ms | **3.5x faster** |
+| 103b4anh.spc | 131 KB | 2.4 ms | 8.1 ms | **3.4x faster** |
+| 087b4ana.spc | 258 KB | 4.1 ms | 14.2 ms | **3.4x faster** |
 | 040b4ana.spc | 131 KB | 2.0 ms | 7.8 ms | **3.9x faster** |
 
-**Average performance: 3.8x faster than spectrochempy**
+**Average performance: 3.6x faster than spectrochempy**
 
 *Run `python benchmark.py` to reproduce these results on your system.*
 
@@ -286,6 +286,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Uses [NumPy](https://numpy.org/) for efficient array operations
 - Developed with [Poetry](https://python-poetry.org/) for dependency management
 - Tested with Spectral Data from the [EPA Spectra](https://www3.epa.gov/ttn/emc/ftir/data.html) data set
+- Performance benchmarks compared against [spectrochempy](https://github.com/spectrochempy/spectrochempy) - the reference Python implementation for SPC file reading
 
 ## Support
 
