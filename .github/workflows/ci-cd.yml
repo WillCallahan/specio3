@@ -257,7 +257,7 @@ jobs:
       run: python -m cibuildwheel --output-dir wheelhouse
       env:
         CIBW_BUILD: cp310-* cp311-* cp312-*
-        # Skip 32-bit and i686 builds, but keep manylinux for proper platform tags
+        # Skip problematic builds and ensure only manylinux
         CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux*"
         # Skip Rust installation - not needed for this project
         CIBW_BEFORE_ALL_LINUX: echo "Skipping Rust installation for faster builds"
@@ -273,9 +273,9 @@ jobs:
         CIBW_BUILD_VERBOSITY: 1
         # Skip wheel testing entirely - we already test in the main test job
         CIBW_TEST_SKIP: "*"
-        # Ensure proper manylinux tags
+        # Force specific manylinux image and ensure proper repair
         CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
-        CIBW_MANYLINUX_AARCH64_IMAGE: manylinux2014
+        CIBW_ARCHS_LINUX: x86_64
         # Speed up builds by using parallel compilation
         CIBW_ENVIRONMENT_LINUX: "CMAKE_BUILD_PARALLEL_LEVEL=4 MAKEFLAGS=-j4"
         CIBW_ENVIRONMENT_MACOS: "CMAKE_BUILD_PARALLEL_LEVEL=4 MAKEFLAGS=-j4"
@@ -313,7 +313,12 @@ jobs:
         ls -la dist/
         echo "Verifying wheel platform tags:"
         for wheel in dist/*.whl; do
-          echo "  $wheel"
+          if [[ "$wheel" == *"linux_x86_64"* ]]; then
+            echo "❌ ERROR: Found unsupported linux_x86_64 tag: $wheel"
+            exit 1
+          else
+            echo "✅ $wheel"
+          fi
         done
 
     - name: Publish to Test PyPI
@@ -349,7 +354,12 @@ jobs:
         ls -la dist/
         echo "Verifying wheel platform tags:"
         for wheel in dist/*.whl; do
-          echo "  $wheel"
+          if [[ "$wheel" == *"linux_x86_64"* ]]; then
+            echo "❌ ERROR: Found unsupported linux_x86_64 tag: $wheel"
+            exit 1
+          else
+            echo "✅ $wheel"
+          fi
         done
 
     - name: Publish to PyPI
