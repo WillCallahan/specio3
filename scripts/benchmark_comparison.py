@@ -3,11 +3,18 @@
 Comparison benchmark between specio3 and spectrochempy.
 """
 
+import sys
 import time
 import statistics
 import warnings
-import specio3
 from pathlib import Path
+
+# Add the project root to Python path so we can import specio3
+script_dir = Path(__file__).parent
+project_root = script_dir.parent
+sys.path.insert(0, str(project_root))
+
+import specio3
 
 # Suppress spectrochempy warnings for cleaner output
 warnings.filterwarnings('ignore')
@@ -54,7 +61,10 @@ def benchmark_spectrochempy(filepath, num_runs=5):
 
 def main():
     """Run comparison benchmark."""
-    test_data_dir = Path(__file__).parent / 'tests' / 'data'
+    # Get the project root directory (parent of scripts)
+    script_dir = Path(__file__).parent
+    project_root = script_dir.parent
+    test_data_dir = project_root / 'tests' / 'data'
     
     # Test on a few representative files
     test_files = [

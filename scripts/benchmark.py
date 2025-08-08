@@ -5,11 +5,18 @@ Tests performance on various file sizes and formats.
 """
 
 import os
+import sys
 import time
 import statistics
 import psutil
-import specio3
 from pathlib import Path
+
+# Add the project root to Python path so we can import specio3
+script_dir = Path(__file__).parent
+project_root = script_dir.parent
+sys.path.insert(0, str(project_root))
+
+import specio3
 
 
 def get_file_info(filepath):
@@ -70,7 +77,10 @@ def benchmark_file(filepath, num_runs=5):
 
 def main():
     """Run benchmarks on test data."""
-    test_data_dir = Path(__file__).parent / 'tests' / 'data'
+    # Get the project root directory (parent of scripts)
+    script_dir = Path(__file__).parent
+    project_root = script_dir.parent
+    test_data_dir = project_root / 'tests' / 'data'
     
     if not test_data_dir.exists():
         print(f"Test data directory not found: {test_data_dir}")

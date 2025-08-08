@@ -189,7 +189,7 @@ specio3 significantly outperforms the reference implementation from [spectrochem
 
 **Average performance: 3.6x faster than spectrochempy**
 
-*Run `python benchmark.py` to reproduce these results on your system.*
+*Run `python scripts/benchmark.py` to reproduce these results on your system.*
 
 ## Contributing
 
@@ -286,6 +286,27 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Developed with [Poetry](https://python-poetry.org/) for dependency management
 - Tested with Spectral Data from the [EPA Spectra](https://www3.epa.gov/ttn/emc/ftir/data.html) data set
 - Performance benchmarks compared against [spectrochempy](https://github.com/spectrochempy/spectrochempy) - the reference Python implementation for SPC file reading
+
+## Project Structure
+
+```
+specio3/
+├── specio3/           # Main Python package
+│   ├── __init__.py    # Package initialization and public API
+│   ├── __main__.py    # Command-line interface
+│   ├── *.cpp          # C++ implementation files
+│   └── *.h            # C++ header files
+├── tests/             # Test suite
+│   ├── data/          # Test SPC files
+│   └── *.py           # Test modules
+├── scripts/           # Utility scripts
+│   ├── benchmark.py   # Performance benchmarking
+│   └── benchmark_comparison.py  # Comparison with other libraries
+├── docs/              # Documentation
+│   ├── spc-specification.pdf    # SPC file format specification
+│   └── SECURITY_AUDIT.md        # Security analysis and recommendations
+└── README.md          # This file
+```
 
 ## Support
 
