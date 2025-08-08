@@ -7,8 +7,7 @@
 [![Downloads](https://pepy.tech/badge/specio3)](https://pepy.tech/project/specio3)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-A high-performance Python library for reading Galactic SPC (Spectral data Collection) files. Built with C++ for speed
-and wrapped with pybind11 for seamless Python integration.
+A high-performance Python library for reading Galactic SPC (Spectral Data Collection) files. Built with C++ for speed and wrapped with pybind11 for seamless Python integration.
 
 ## Features
 
@@ -58,9 +57,9 @@ spectra = specio3.read_spc('your_file.spc')
 x_values, y_values = spectra[0]
 
 # Plot the spectrum
-plt.figure(figsize = (10, 6))
+plt.figure(figsize=(10, 6))
 plt.plot(x_values, y_values)
-plt.xlabel('Wavelength (nm)')
+plt.xlabel('Wavenumber (cm⁻¹)')
 plt.ylabel('Intensity')
 plt.title('Spectral Data')
 plt.show()
@@ -113,10 +112,10 @@ spectra = specio3.read_spc('multi_spectrum.spc')
 for i, (x, y) in enumerate(spectra):
     # Find peak
     peak_idx = np.argmax(y)
-    peak_wavelength = x[peak_idx]
+    peak_wavenumber = x[peak_idx]
     peak_intensity = y[peak_idx]
 
-    print(f"Spectrum {i}: Peak at {peak_wavelength:.2f} nm with intensity {peak_intensity:.2f}")
+    print(f"Spectrum {i}: Peak at {peak_wavenumber:.2f} cm⁻¹ with intensity {peak_intensity:.6f}")
 ```
 
 ### Error Handling
@@ -148,16 +147,16 @@ spectra = specio3.read_spc('example.spc')
 x, y = spectra[0]
 
 # Create DataFrame for analysis
-df = pd.DataFrame({'wavelength': x, 'intensity': y})
+df = pd.DataFrame({'wavenumber': x, 'intensity': y})
 
 # Apply smoothing
-y_smooth = signal.savgol_filter(y, window_length = 5, polyorder = 2)
+y_smooth = signal.savgol_filter(y, window_length=5, polyorder=2)
 
 # Find peaks
-peaks, _ = signal.find_peaks(y_smooth, height = 0.1)
-peak_wavelengths = x[peaks]
+peaks, _ = signal.find_peaks(y_smooth, height=0.1)
+peak_wavenumbers = x[peaks]
 
-print(f"Found {len(peaks)} peaks at: {peak_wavelengths}")
+print(f"Found {len(peaks)} peaks at: {peak_wavenumbers}")
 ```
 
 ## Performance
@@ -236,7 +235,7 @@ poetry run test
 poetry run test
 
 # Run with coverage
-poetry run coverate
+poetry run coverage
 
 # Run specific test file
 poetry run pytest tests/spc_reader_test.py -v
