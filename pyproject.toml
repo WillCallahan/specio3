@@ -1,6 +1,6 @@
 [project]
 name = "specio3"
-version = "0.1.1"
+version = "0.1.2"
 description = "Spectral File Serializer"
 authors = [
     { name = "William Callahan", email = "willcallahan94@att.net" }

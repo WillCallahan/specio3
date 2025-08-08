@@ -270,6 +270,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Changelog
 
+### v0.1.2 (2025-08-08)
+
+- **Performance**: Optimized GitHub Actions wheel builds (5.6x faster)
+- **Security**: Comprehensive security audit and vulnerability fixes
+- **Organization**: Improved project structure with docs/ and scripts/ directories
+- **Testing**: Enhanced test reliability and removed .DS_Store from test output
+- **CI/CD**: Fixed wheel platform tags and deployment issues
+
 ### v0.1.0 (2025-08-02)
 
 - Initial release
