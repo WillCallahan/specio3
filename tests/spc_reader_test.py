@@ -18,7 +18,10 @@ class SpcFileTests(unittest.TestCase):
             self.assertEqual(item[0].shape, item[1].shape)
 
     def test_read_multifile(self):
-        files = os.listdir(self.data_path)
+        # Only test .spc files, filter out system files like .DS_Store
+        files = [f for f in os.listdir(self.data_path) if f.lower().endswith('.spc')]
+        files.sort()  # Sort for consistent test order
+        
         for file in files:
             self._test_read_multifile(file)
 
