@@ -225,7 +225,7 @@ jobs:
   build-wheels:
     name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 45  # Reduced from 60 minutes
     needs: test
     if: github.event_name == 'release' || github.ref == 'refs/heads/main'
     strategy:
@@ -243,17 +243,24 @@ jobs:
     - name: Install cibuildwheel
       run: python -m pip install cibuildwheel==2.16.2
 
+    - name: Cache wheel dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/pip
+          /opt/python/*/lib/python*/site-packages
+        key: wheel-deps-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'setup.py') }}
+        restore-keys: |
+          wheel-deps-${{ runner.os }}-
+
     - name: Build wheels
       run: python -m cibuildwheel --output-dir wheelhouse
       env:
         CIBW_BUILD: cp310-* cp311-* cp312-*
-        CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_i686"
-        CIBW_BEFORE_ALL_LINUX: |
-          if [ "$(uname -m)" != "i686" ]; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && source ~/.cargo/env || echo "Rust installation failed, continuing without it"
-          else
-            echo "Skipping Rust installation on i686 architecture"
-          fi
+        # Skip 32-bit, i686, and musllinux builds for faster CI
+        CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux*"
+        # Skip Rust installation - not needed for this project
+        CIBW_BEFORE_ALL_LINUX: echo "Skipping Rust installation for faster builds"
         CIBW_BEFORE_BUILD_LINUX: |
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install --only-binary=numpy,scipy pybind11 numpy
@@ -264,12 +271,14 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install --only-binary=numpy,scipy pybind11 numpy
         CIBW_BUILD_VERBOSITY: 1
-        CIBW_TEST_REQUIRES: pytest numpy
-        CIBW_TEST_COMMAND: python -c "import specio3; print('Import successful'); print('Available functions:', dir(specio3))"
+        # Simplified test - just import, don't install pytest
+        CIBW_TEST_COMMAND: python -c "import specio3; print('✅ Import successful')"
         # Speed up builds by using parallel compilation
-        CIBW_ENVIRONMENT_LINUX: "CMAKE_BUILD_PARALLEL_LEVEL=2"
-        CIBW_ENVIRONMENT_MACOS: "CMAKE_BUILD_PARALLEL_LEVEL=2"
-        CIBW_ENVIRONMENT_WINDOWS: "CMAKE_BUILD_PARALLEL_LEVEL=2"
+        CIBW_ENVIRONMENT_LINUX: "CMAKE_BUILD_PARALLEL_LEVEL=4 MAKEFLAGS=-j4"
+        CIBW_ENVIRONMENT_MACOS: "CMAKE_BUILD_PARALLEL_LEVEL=4 MAKEFLAGS=-j4"
+        CIBW_ENVIRONMENT_WINDOWS: "CMAKE_BUILD_PARALLEL_LEVEL=4"
+        # Additional optimizations
+        CIBW_ENVIRONMENT: "PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1"
 
     - name: Upload wheel artifacts
       uses: actions/upload-artifact@v4
