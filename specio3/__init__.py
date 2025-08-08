@@ -89,25 +89,39 @@ def read_spc(path: str) -> List[Tuple[NDArray[np.float64], NDArray[np.float64]]]
     >>> plt.ylabel('Intensity')
     >>> plt.show()
     """
-    result = _read_spc(path)
+    result_dict = _read_spc(path)
 
     # Validate the result structure
-    if not isinstance(result, list):
-        raise RuntimeError("Expected a list of (x, y) tuples from the SPC file.")
+    if not isinstance(result_dict, dict):
+        raise RuntimeError("Expected a dictionary from the SPC file reader.")
 
-    if not result:
+    if 'subfiles' not in result_dict:
+        raise RuntimeError("No subfiles found in the SPC file.")
+
+    subfiles = result_dict['subfiles']
+    if not subfiles:
         raise RuntimeError("No spectra found in the SPC file.")
 
-    for i, item in enumerate(result):
-        if not isinstance(item, tuple) or len(item) != 2:
-            raise RuntimeError(f"Spectrum {i}: Expected a tuple of (x_array, y_array).")
+    # Convert to list of (x, y) tuples with numpy arrays
+    result = []
+    for i, subfile in enumerate(subfiles):
+        if not isinstance(subfile, dict) or 'x' not in subfile or 'y' not in subfile:
+            raise RuntimeError(f"Spectrum {i}: Expected a dictionary with 'x' and 'y' keys.")
 
-        x_arr, y_arr = item
-        if not hasattr(x_arr, '__len__') or not hasattr(y_arr, '__len__'):
-            raise RuntimeError(f"Spectrum {i}: x and y must be array-like objects.")
+        x_data = subfile['x']
+        y_data = subfile['y']
+        
+        # Convert to numpy arrays
+        x_arr = np.array(x_data, dtype=np.float64)
+        y_arr = np.array(y_data, dtype=np.float64)
 
         if len(x_arr) != len(y_arr):
             raise RuntimeError(f"Spectrum {i}: x and y arrays have different lengths ({len(x_arr)} vs {len(y_arr)}).")
+
+        if len(x_arr) == 0:
+            raise RuntimeError(f"Spectrum {i}: Empty spectrum data.")
+
+        result.append((x_arr, y_arr))
 
     return result
 

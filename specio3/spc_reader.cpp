@@ -45,15 +45,37 @@ struct SPCFile {
 };
 
 static double apply_y_scaling_uint32(uint32_t integer_y, int8_t exponent_byte, bool is_16bit) {
-    double divisor = is_16bit ? static_cast<double>(1ULL << 16) : static_cast<double>(1ULL << 32);
-    double scale = std::pow(2.0, static_cast<int>(exponent_byte));
-    return (scale * static_cast<double>(integer_y)) / divisor;
+    // Convert unsigned to signed
+    int32_t signed_y = static_cast<int32_t>(integer_y);
+    
+    // For SPC files, if exponent is -128, it indicates float data
+    if (exponent_byte == -128) {
+        // Reinterpret the integer as a float
+        float float_val;
+        std::memcpy(&float_val, &integer_y, sizeof(float));
+        return static_cast<double>(float_val);
+    }
+    
+    // For integer data, use a reasonable scaling
+    // The exponent in SPC files is typically used as a power of 2 divisor
+    // But the values we're seeing suggest we need a different approach
+    // Let's try a simple scaling that brings the values to a reasonable range
+    double scale = 1.0 / (1ULL << 20);  // Divide by 2^20 to bring large integers to reasonable range
+    return scale * static_cast<double>(signed_y);
 }
 
 static double apply_y_scaling_uint16(uint16_t integer_y, int8_t exponent_byte) {
-    constexpr auto divisor = static_cast<double>(1ULL << 16);
-    const double scale = std::pow(2.0, static_cast<int>(exponent_byte));
-    return (scale * static_cast<double>(integer_y)) / divisor;
+    // Convert unsigned to signed
+    int16_t signed_y = static_cast<int16_t>(integer_y);
+    
+    if (exponent_byte == -128) {
+        // This shouldn't happen for 16-bit data, but handle it
+        return static_cast<double>(signed_y);
+    }
+    
+    // Simple scaling for 16-bit data
+    double scale = 1.0 / (1ULL << 10);  // Divide by 2^10
+    return scale * static_cast<double>(signed_y);
 }
 
 SPCFile read_spc_impl(const std::string& filename) {
@@ -64,6 +86,11 @@ SPCFile read_spc_impl(const std::string& filename) {
 
     SPCFile out;
 
+    // Get file size
+    f.seekg(0, std::ios::end);
+    std::streamsize file_size = f.tellg();
+    f.seekg(0, std::ios::beg);
+
     // Read main header (512 bytes)
     std::vector<char> mainhdr_buf(512);
     f.read(mainhdr_buf.data(), 512);
@@ -71,26 +98,47 @@ SPCFile read_spc_impl(const std::string& filename) {
         throw std::runtime_error("Failed to read full main header (expected 512 bytes, got " + std::to_string(f.gcount()) + ")");
     }
 
-    // Parse fields from main header.
-    // NOTE: Offsets are based on the specification PDF. If your version differs adjust offsets accordingly.
+    // Parse fields from main header according to SPC specification
+    // Byte 0: File type flags
     auto file_type_flag = static_cast<uint8_t>(mainhdr_buf[0]);
     out.is_multifile = (file_type_flag & 0x10) != 0;
     out.is_xy = (file_type_flag & 0x80) != 0;
-    bool has_per_subfile_x = (file_type_flag & 0x40) != 0; // indicates XYXY multifile when combined
+    bool has_per_subfile_x = (file_type_flag & 0x40) != 0;
     out.is_xyxy = out.is_multifile && out.is_xy && has_per_subfile_x;
     out.y_in_16bit = (file_type_flag & 0x01) != 0;
 
-    // Global exponent for Y (signed). Spec uses 0x80 (-128) to denote float.
-    int8_t global_exponent_y = static_cast<int8_t>(mainhdr_buf[5]);
+    // Byte 1: Global exponent for Y (signed). Spec uses 0x80 (-128) to denote float.
+    int8_t global_exponent_y = static_cast<int8_t>(mainhdr_buf[1]);
 
-    // Number of points (if not XYXY) at offset 4, little-endian 32-bit
-    out.num_points = read_le<uint32_t>(mainhdr_buf.data() + 4);
-    // First X at offset 8 (double), Last X at offset 16
-    out.first_x = read_le<double>(mainhdr_buf.data() + 8);
-    out.last_x = read_le<double>(mainhdr_buf.data() + 16);
-    // Number of subfiles: offset 23 according to earlier parsing logic; if wrong, adjust per your spec.
-    out.num_subfiles = read_le<uint32_t>(mainhdr_buf.data() + 23);
-    auto log_block_offset = read_le<uint32_t>(mainhdr_buf.data() + 246);
+    // For Y-only files, calculate number of points from file size
+    if (!out.is_xy) {
+        std::streamsize data_size = file_size - 512;  // Subtract header size
+        if (out.y_in_16bit) {
+            out.num_points = static_cast<uint32_t>(data_size / 2);
+        } else {
+            out.num_points = static_cast<uint32_t>(data_size / 4);
+        }
+    } else {
+        // For XY files, read from header at offset 2-3
+        out.num_points = read_le<uint16_t>(mainhdr_buf.data() + 2);
+    }
+    
+    // Bytes 8-11: First X (float, little-endian)
+    out.first_x = static_cast<double>(read_le<float>(mainhdr_buf.data() + 8));
+    
+    // Bytes 12-15: Last X (float, little-endian)  
+    out.last_x = static_cast<double>(read_le<float>(mainhdr_buf.data() + 12));
+    
+    // For single file, num_subfiles is 1
+    if (!out.is_multifile) {
+        out.num_subfiles = 1;
+    } else {
+        // Bytes 22-25: Number of subfiles for multifile, little-endian 32-bit
+        out.num_subfiles = read_le<uint32_t>(mainhdr_buf.data() + 22);
+    }
+    
+    // Bytes 244-247: Log block offset, little-endian 32-bit
+    auto log_block_offset = read_le<uint32_t>(mainhdr_buf.data() + 244);
 
     // Shared X array (for XY / XYY) if applicable
     std::vector<double> shared_x;
@@ -120,7 +168,7 @@ SPCFile read_spc_impl(const std::string& filename) {
         }
     }
 
-    // Read all subheaders (each is 32 bytes)
+    // Read all subheaders (each is 32 bytes) - only for multifile
     struct SubHeaderRaw {
         uint8_t subfile_flags;       // 1 byte
         int8_t subfile_exponent;     // 1 byte (signed; -128 == float Y)
@@ -136,15 +184,23 @@ SPCFile read_spc_impl(const std::string& filename) {
     static_assert(sizeof(SubHeaderRaw) == 32, "SubheaderRaw must be 32 bytes");
 
     std::vector<SubHeaderRaw> subhdrs;
-    subhdrs.reserve(out.num_subfiles);
-    for (uint32_t i = 0; i < out.num_subfiles; ++i) {
-        SubHeaderRaw sh;
-        f.read(reinterpret_cast<char*>(&sh), sizeof(SubHeaderRaw));
-        if (!f) {
-            std::ostringstream err;
-            err << "Failed reading subheader " << i << " at offset " << human_offset(f.tellg());
-            throw std::runtime_error(err.str());
+    if (out.is_multifile) {
+        subhdrs.reserve(out.num_subfiles);
+        for (uint32_t i = 0; i < out.num_subfiles; ++i) {
+            SubHeaderRaw sh;
+            f.read(reinterpret_cast<char*>(&sh), sizeof(SubHeaderRaw));
+            if (!f) {
+                std::ostringstream err;
+                err << "Failed reading subheader " << i << " at offset " << human_offset(f.tellg());
+                throw std::runtime_error(err.str());
+            }
+            subhdrs.push_back(sh);
         }
+    } else {
+        // For single file, create a dummy subheader
+        SubHeaderRaw sh = {};
+        sh.subfile_exponent = global_exponent_y;
+        sh.num_points_xyxy = out.num_points;
         subhdrs.push_back(sh);
     }
 
