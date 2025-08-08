@@ -1,0 +1,131 @@
+--- a/specio3/spc_reader.cpp
++++ b/specio3/spc_reader.cpp
+@@ -6,6 +6,13 @@
+ #include <cstring>
+ #include <sstream>
++#include <limits>
++#include <algorithm>
++#include <cmath>
++
++// Security constants
++static constexpr size_t MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1GB limit
++static constexpr uint32_t MAX_NUM_POINTS = 10000000; // 10M points max
++static constexpr uint32_t MAX_NUM_SUBFILES = 100000; // 100K subfiles max
+ 
+ namespace py = pybind11;
+ 
+@@ -15,9 +22,16 @@ static std::string human_offset(std::streamoff o) {
+     return ss.str();
+ }
+ 
+-// Helpers for reading little-endian values (assuming host is little-endian; if not, you need byte-swapping)
++// Secure helper for reading little-endian values with bounds checking
+ template <typename T>
+-T read_le(const char* buffer) {
++T read_le_secure(const char* buffer, size_t buffer_size, size_t offset = 0) {
++    if (buffer == nullptr) {
++        throw std::runtime_error("Security: null buffer pointer");
++    }
++    if (offset + sizeof(T) > buffer_size) {
++        throw std::runtime_error("Security: buffer overflow attempt detected");
++    }
+     T v;
+-    std::memcpy(&v, buffer, sizeof(T));
++    std::memcpy(&v, buffer + offset, sizeof(T));
+     return v;
+ }
+@@ -45,6 +59,32 @@ struct SPCFile {
+     std::string log_text;
+ };
+ 
++// Security validation functions
++static void validate_num_points(uint32_t num_points) {
++    if (num_points == 0) {
++        throw std::runtime_error("Security: number of points cannot be zero");
++    }
++    if (num_points > MAX_NUM_POINTS) {
++        throw std::runtime_error("Security: number of points exceeds maximum allowed");
++    }
++}
++
++static void validate_num_subfiles(uint32_t num_subfiles) {
++    if (num_subfiles == 0) {
++        throw std::runtime_error("Security: number of subfiles cannot be zero");
++    }
++    if (num_subfiles > MAX_NUM_SUBFILES) {
++        throw std::runtime_error("Security: number of subfiles exceeds maximum allowed");
++    }
++}
++
++static void validate_file_size(std::streamsize file_size) {
++    if (file_size <= 0) {
++        throw std::runtime_error("Security: invalid file size");
++    }
++    if (static_cast<size_t>(file_size) > MAX_FILE_SIZE) {
++        throw std::runtime_error("Security: file size exceeds maximum allowed");
++    }
++}
++
+ static double apply_y_scaling_uint32(uint32_t integer_y, int8_t exponent_byte, bool is_16bit) {
+     // For SPC files, if exponent is -128, it indicates float data
+     if (exponent_byte == -128) {
+@@ -52,6 +92,10 @@ static double apply_y_scaling_uint32(uint32_t integer_y, int8_t exponent_byte,
+         float float_val;
+         std::memcpy(&float_val, &integer_y, sizeof(float));
++        // Validate the float value
++        if (!std::isfinite(float_val)) {
++            throw std::runtime_error("Security: invalid float value in Y data");
++        }
+         return static_cast<double>(float_val);
+     }
+     
++    // Validate exponent range
++    if (exponent_byte < -50 || exponent_byte > 50) {
++        throw std::runtime_error("Security: exponent out of safe range");
++    }
++    
+     // Convert unsigned to signed
+     int32_t signed_y = static_cast<int32_t>(integer_y);
+     
+     // Use the correct SPC scaling formula: Y = integer / (2^(32-exponent))
+     double divisor = std::pow(2.0, 32 - static_cast<int>(exponent_byte));
++    
++    // Validate divisor
++    if (divisor == 0.0 || !std::isfinite(divisor)) {
++        throw std::runtime_error("Security: invalid divisor in Y scaling");
++    }
++    
+-    return static_cast<double>(signed_y) / divisor;
++    double result = static_cast<double>(signed_y) / divisor;
++    
++    // Validate result
++    if (!std::isfinite(result)) {
++        throw std::runtime_error("Security: Y scaling produced invalid result");
++    }
++    
++    return result;
+ }
+ 
+ SPCFile read_spc_impl(const std::string& filename) {
++    // Validate filename
++    if (filename.empty()) {
++        throw std::runtime_error("Security: empty filename");
++    }
++    
++    // Check for path traversal
++    if (filename.find("..") != std::string::npos) {
++        throw std::runtime_error("Security: path traversal attempt detected");
++    }
++    
+     std::ifstream f(filename, std::ios::binary);
+     if (!f) {
+         throw std::runtime_error("Unable to open file: " + filename);
+@@ -95,6 +159,8 @@ SPCFile read_spc_impl(const std::string& filename) {
+     std::streamsize file_size = f.tellg();
+     f.seekg(0, std::ios::beg);
+ 
++    validate_file_size(file_size);
++
+     // Read first 2 bytes to determine format
+     char format_bytes[2];
+     f.read(format_bytes, 2);
