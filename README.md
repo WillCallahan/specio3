@@ -4,7 +4,6 @@
 [![PyPI version](https://badge.fury.io/py/specio3.svg)](https://badge.fury.io/py/specio3)
 [![Python versions](https://img.shields.io/pypi/pyversions/specio3.svg)](https://pypi.org/project/specio3/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Downloads](https://pepy.tech/badge/specio3)](https://pepy.tech/project/specio3)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 A high-performance Python library for reading Galactic SPC (Spectral Data Collection) files. Built with C++ for speed and wrapped with pybind11 for seamless Python integration.
